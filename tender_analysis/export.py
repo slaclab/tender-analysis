@@ -121,8 +121,15 @@ def _fallback_normalize(energy: np.ndarray, mu: np.ndarray):
 
     post_curve = np.polyval(post_c, e)
     edge_step = float(np.polyval(post_c, e0))
-    if not np.isfinite(edge_step) or edge_step == 0:
-        edge_step = 1.0
+    if not np.isfinite(edge_step) or edge_step <= 0:
+        # A non-positive edge step means the fit is meaningless -- typically a
+        # scan with no flat pre-edge region, where the pre-edge line is fit
+        # through the edge itself and extrapolates above the post-edge. Say so
+        # rather than dividing by it: the caller turns this into NaN columns
+        # and a header line, and `mu` is unaffected either way.
+        raise ValueError(
+            f"edge step is {edge_step:.4g}; the scan has no usable pre-edge "
+            "region to normalize against")
     norm = sub / edge_step
     # flat: above e0, subtract the post-edge curvature's departure from its
     # value at e0, so the normalized spectrum sits flat at 1.
@@ -147,7 +154,17 @@ def normalize_mu(energy, mu, overrides: dict | None = None) -> NormalizationResu
             continue
         return NormalizationResult(norm=norm, flat=flat, e0=e0,
                                    edge_step=edge_step, method=method)
-    norm, flat, e0, edge_step = _fallback_normalize(energy, mu)
+    try:
+        norm, flat, e0, edge_step = _fallback_normalize(energy, mu)
+    except ValueError as exc:
+        # A spectrum too short or too flat to normalize is still a spectrum.
+        # Refusing to write it would lose the measurement over a derived
+        # column; NaN says "not computed" without inventing a number, and the
+        # header says why.
+        nan = np.full(np.shape(energy), np.nan)
+        return NormalizationResult(norm=nan, flat=nan, e0=float("nan"),
+                                   edge_step=float("nan"),
+                                   method=f"not normalized ({exc})")
     return NormalizationResult(norm=norm, flat=flat, e0=e0, edge_step=edge_step,
                                method="tender_analysis fallback (no xraylarch)")
 
@@ -215,7 +232,8 @@ def write_xas_csv(result, path, meta: dict | None = None,
         "energy axis": "incident energy (mono, eV)",
         "columns": "energy_eV mu norm flat tfy",
         "normalization": norm_result.method,
-        "pre_edge": f"e0={norm_result.e0:.3f} edge_step={norm_result.edge_step:.6g}",
+        "pre_edge": (f"e0={norm_result.e0:.3f} edge_step={norm_result.edge_step:.6g}"
+                     if np.isfinite(norm_result.e0) else None),
         "central_pix": getattr(result, "central_pix", None),
     }
     if overrides:

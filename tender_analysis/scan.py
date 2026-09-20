@@ -78,6 +78,12 @@ class ScanReport:
     def n_measurements(self) -> int:
         return len(self.measurements)
 
+    @property
+    def reasons(self) -> dict:
+        """The rejection vocabulary, so a caller rendering this report can
+        explain a reason without hard-coding the strings."""
+        return REJECT_REASONS
+
     def as_dict(self) -> dict:
         return {"directory": self.directory, "n_files": self.n_files,
                 "measurements": self.measurements, "rejected": self.rejected,
