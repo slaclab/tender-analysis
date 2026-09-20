@@ -1,3 +1,19 @@
+Metadata-Version: 2.4
+Name: tender-analysis
+Version: 0.2.0
+Summary: SIF XES/RIXS/HERFD reduction for SSRL tender X-ray beamlines (BL 6-2a)
+License: BSD-3-Clause
+Project-URL: Homepage, https://github.com/slaclab/tender-analysis
+Project-URL: Upstream, https://github.com/jtbabicz/Tender_Analysis
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.11
+Requires-Dist: natsort>=8
+Requires-Dist: sif_parser>=0.3
+Provides-Extra: notebook
+Requires-Dist: matplotlib>=3.7; extra == "notebook"
+
 # Tender Analysis — Python SIF XES/RIXS analysis
 
 Object-oriented Python rewrite of the MATLAB Tender x-ray analysis package (`MATLAB/sifFiles/onepot.m`, `onepotRIXS.m` and their dependencies).
@@ -21,9 +37,7 @@ sample directory.) Two sample datasets are bundled under `data/`:
 
 ## Package layout
 
-The package is `tender_analysis/` (it was `src/` before it was packaged;
-`from src import ...` still works through a compatibility alias, so existing
-notebooks keep running). Modules port the MATLAB routines one-to-one:
+The package lives in `src/`. Modules port the MATLAB routines one-to-one:
 
 | Module          | Ports (MATLAB)          | Purpose                                              |
 |-----------------|-------------------------|------------------------------------------------------|
@@ -36,8 +50,6 @@ notebooks keep running). Modules port the MATLAB routines one-to-one:
 | `pipeline.py`   | `onepot.m`, `onepotRIXS.m`| `OnePot` / `OnePotRIXS` orchestrators              |
 | `dataset.py`    | (new)                   | `index_beamtime()` / `run_beamtimes()`: group a sample directory into runnable `Measurement`s, batch-run them (optionally parallel, with per-measurement parameters), and write a JSON manifest |
 | `calibration.py`| (new)                   | `ElasticCalibration` / `calibrate_from_directory()`: fit a pixel→energy calibration from elastic scans (post-beamtime, optional) |
-| `scan.py`       | (new)                   | `scan_directory()`: group AND validate a directory, reporting every unusable file with a reason. Header-only, so it runs inline in a web request |
-| `export.py`     | (new)                   | `write_xas_csv()` / `write_xes_csv()`: results in the SSRL chemcat portal's CSV format |
 
 ## Orientation convention
 
@@ -58,11 +70,10 @@ There are two levels of entry point:
 
 ### Single measurement
 
-The public API is exported from the `tender_analysis` package (the notebook's
-`from src import ...` resolves to the same objects):
+The public API is exported from the `src` package (as imported in the notebook):
 
 ```python
-from tender_analysis import (
+from src import (
     SifFile, find_sif_files, compute_background,
     extract_signal, CurvatureCorrection, OnePot, OnePotRIXS,
     index_beamtime, run_beamtimes,
@@ -246,43 +257,6 @@ For batch runs, `Measurement.save_result(result, root=...)` auto-names the file
 from the measurement metadata into an `analysis/` subdirectory (this is what
 `run_all(save_root=...)` calls).
 
-#### CSV for the chemcat portal
-
-`save_txt` is the notebook format and does not change. `export.py` writes the
-same results in the CSV shape the SSRL chemcat portal's viewer reads, so a
-HERFD spectrum reduced here plots beside one measured at BL 15-2:
-
-```python
-from tender_analysis import write_xas_csv, write_xes_csv
-
-write_xas_csv(rixs_out, "na2so4.csv")     # energy_eV, mu, norm, flat, tfy
-write_xes_csv(result, "mo_2523.csv")      # pixel, intensity
-write_xes_csv(result, "mo_2523.csv", calibration=cal)  # emission_eV, pixel, intensity
-```
-
-`norm`/`flat` come from xraylarch's `pre_edge` when it is importable (through
-chemcat's own `xas_core` when running inside the portal's worker, so the
-numbers are the portal's), and from a vendored pre-edge/post-edge fit
-otherwise. The header records which one ran — a fallback-normalized spectrum
-is not interchangeable with a larch-normalized one.
-
-### Validating a directory before running it
-
-`index_beamtime` groups by filename and never opens a file, so a truncated or
-non-Andor `.sif` survives indexing and fails later inside the analysis.
-`scan_directory` adds that check and reports it as data:
-
-```python
-from tender_analysis import scan_directory
-
-report = scan_directory("data/Na2SO4")
-report.measurements   # [{label, kind, n_files, n_dark, energy_min, energy_max, files}]
-report.rejected       # [{file, reason}] — not_sif, bad_header, no_mono, dark, aux, ...
-```
-
-It reads at most 8 kB per file (no frame decode), which is what lets the portal
-run it inline on a page load rather than as a job.
-
 ### Energy calibration (pixel → energy)
 
 The energy-dispersive (pixel) axis is calibrated by collecting elastic
@@ -303,7 +277,7 @@ workflow. Elastic `.sif` files (`*elastic*.sif`) are skipped by
 `index_beamtime` as before; the calibration API opts back in explicitly:
 
 ```python
-from tender_analysis import calibrate_from_directory, ElasticCalibration
+from src import calibrate_from_directory, ElasticCalibration
 
 # Fit from a directory of elastic scans, then persist for reuse.
 cal = calibrate_from_directory("data/elastic_2024-06")   # -> ElasticCalibration
@@ -323,14 +297,13 @@ already carries an incident-energy axis), so a mixed-kind batch is safe.
 
 ## Dependencies
 
-numpy, scipy, natsort, sif_parser. The package itself is plot-free; matplotlib
-is needed only by the example notebook (`pip install tender-analysis[notebook]`).
+numpy, scipy, natsort, matplotlib, sif_parser (plus pytest for tests)
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e .[notebook]
+.venv/bin/pip install numpy scipy matplotlib sif_parser natsort pytest
 ```
 
 Then launch the example notebook:

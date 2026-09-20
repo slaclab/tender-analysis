@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tender-analysis"
+version = "0.2.0"
+description = "SIF XES/RIXS/HERFD reduction for SSRL tender X-ray beamlines (BL 6-2a)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "natsort>=8",
+    "sif_parser>=0.3",
+]
+
+[project.optional-dependencies]
+# Notebook/plot extras: the package itself is plot-free, the example notebook
+# is not.
+notebook = ["matplotlib>=3.7"]
+
+[project.urls]
+Homepage = "https://github.com/slaclab/tender-analysis"
+Upstream = "https://github.com/jtbabicz/Tender_Analysis"
+
+[tool.setuptools]
+# EXPLICIT, not find:. `data/` is 336 MB of .sif committed upstream and
+# deliberately kept in history (a fork shares storage with its parent, and a
+# rewrite would break rebasing onto upstream). Naming the packages keeps it out
+# of the sdist/wheel and out of any image built from this tree; .dockerignore
+# keeps it out of a build context.
+packages = ["tender_analysis", "src"]
+
+[tool.setuptools.package-dir]
+src = "compat/src"

@@ -11,6 +11,7 @@ MATLAB originals is intentionally dropped.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field as dataclasses_field
@@ -23,6 +24,13 @@ from .background import compute_background
 from .curvature import CurvatureCorrection
 from .files import find_sif_files
 from .sif_io import SifFile
+
+# These two messages fire unconditionally on every RIXS run, including inside a
+# chemcat worker job and a process-pool child, where stdout is a job log nobody
+# reads line by line. They are provenance, not progress, so they go to a logger
+# a caller can configure or silence -- unlike the opt-in `verbose` prints, which
+# the caller already asked for.
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -336,8 +344,8 @@ class OnePotRIXS(OnePot):
             if self.exclude_dark:
                 paths = [p for p in paths if not self._is_dark(p)]
                 if self._dark_paths:
-                    print(f"OnePotRIXS: excluded {len(self._dark_paths)} dark "
-                          f"frame(s) (*{self.dark_suffix}.sif) from the scan")
+                    logger.info("excluded %d dark frame(s) (*%s.sif) from the scan",
+                                len(self._dark_paths), self.dark_suffix)
             self._paths = paths
             self._sif = [SifFile(p) for p in paths]
         return self._paths
@@ -356,8 +364,8 @@ class OnePotRIXS(OnePot):
         dark = SifFile(self._dark_paths[0])
         # Average the dark's frames, mirroring onepot.m:146-154.
         bcg = dark.data.mean(axis=0)
-        print(f"OnePotRIXS: using {os.path.basename(self._dark_paths[0])} "
-              f"as background (mean ADU {bcg.mean():.1f})")
+        logger.info("using %s as background (mean ADU %.1f)",
+                    os.path.basename(self._dark_paths[0]), bcg.mean())
         return bcg
 
     def herfd(self, central_pix=None, n: int = 3, i0_corr: bool = True) -> RIXSResult:

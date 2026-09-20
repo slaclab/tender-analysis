@@ -351,18 +351,50 @@ class MeasurementRun:
 
 
 def _result_summary(m: Measurement, result) -> dict:
-    """Small, picklable scalar summary of a result (survives array-dropping)."""
+    """Small, picklable scalar summary of a result (survives array-dropping).
+
+    These few numbers are the only thing that survives a parallel run
+    (``keep_result=False`` drops the arrays), and they are what a portal shows
+    beside a processed file without reading it: the edge position and step say
+    at a glance whether the reduction produced a spectrum or noise, and the
+    point count and energy range say what was covered.
+
+    Every field is best-effort. ``e0``/``edge_step`` come from
+    :func:`tender_analysis.export.normalize_mu`, which needs neither larch nor
+    chemcat to answer, but a XANES-only or failed scan can still leave them
+    absent -- a summary must never be the thing that fails a batch.
+    """
     out = {"kind": m.kind}
     try:
         if m.kind == "RIXS":
             out["central_pix"] = int(getattr(result, "central_pix", -1))
+            out["i0_corrected"] = bool((getattr(result, "meta", None) or {})
+                                       .get("i0_corrected", False))
             herfd = getattr(result, "HERFD", None)
+            energy = getattr(result, "E", None)
             if herfd is not None:
                 out["herfd_sum"] = float(np.nansum(herfd))
+            if energy is not None:
+                e = np.asarray(energy, dtype=float)
+                finite = e[np.isfinite(e)]
+                out["n_points"] = int(e.size)
+                if finite.size:
+                    out["energy_min"] = float(finite.min())
+                    out["energy_max"] = float(finite.max())
+            if herfd is not None and energy is not None:
+                try:
+                    from .export import normalize_mu
+                    norm = normalize_mu(energy, herfd)
+                    out["e0"] = round(float(norm.e0), 3)
+                    out["edge_step"] = float(norm.edge_step)
+                    out["normalization"] = norm.method
+                except Exception:  # noqa: BLE001 -- XANES-only / unusable mu(E)
+                    pass
         else:
             spec = result.spectrum()
             out["spectrum_sum"] = float(spec.sum())
             out["peak_pixel"] = int(np.argmax(spec))
+            out["n_points"] = int(spec.size)
     except Exception:  # noqa: BLE001 -- summary is best-effort, never fatal
         pass
     return out

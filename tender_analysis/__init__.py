@@ -23,6 +23,8 @@ from .dataset import (
 from .calibration import (
     ElasticCalibration, ElasticPoint, index_elastic, calibrate_from_directory,
 )
+from .scan import ScanReport, scan_directory
+from .export import write_xas_csv, write_xes_csv, normalize_mu
 
 __all__ = [
     "OnePot",
@@ -47,4 +49,9 @@ __all__ = [
     "ElasticPoint",
     "index_elastic",
     "calibrate_from_directory",
+    "ScanReport",
+    "scan_directory",
+    "write_xas_csv",
+    "write_xes_csv",
+    "normalize_mu",
 ]

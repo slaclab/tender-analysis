@@ -1,0 +1,6 @@
+# 336 MB of .sif fixtures live in git history and in the checkout; nothing in
+# an image needs them.
+data/
+.git/
+*.ipynb
+__pycache__/
