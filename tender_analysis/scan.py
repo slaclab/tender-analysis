@@ -73,6 +73,10 @@ class ScanReport:
     measurements: list[dict] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)
     n_files: int = 0
+    #: False -> file HEADERS were not read, so `rejected` carries only the
+    #: name-derived reasons (dark/aux/echem/energy) and a truncated or
+    #: non-Andor file is still listed inside its measurement.
+    validated: bool = True
 
     @property
     def n_measurements(self) -> int:
@@ -86,6 +90,7 @@ class ScanReport:
 
     def as_dict(self) -> dict:
         return {"directory": self.directory, "n_files": self.n_files,
+                "validated": self.validated,
                 "measurements": self.measurements, "rejected": self.rejected,
                 "reasons": REJECT_REASONS}
 
@@ -118,16 +123,28 @@ def _energy_range(paths: list[str]) -> tuple[float | None, float | None]:
 
 
 def scan_directory(directory: str, *, recursive: bool = False,
-                   skip_echem: bool = True, skip_aux: bool = True) -> ScanReport:
-    """Group and validate every ``.sif`` under ``directory``.
+                   skip_echem: bool = True, skip_aux: bool = True,
+                   validate: bool = True) -> ScanReport:
+    """Group every ``.sif`` under ``directory``, and optionally validate it.
 
     Grouping is :func:`index_beamtime`'s, unchanged -- this wraps it rather
     than reimplementing it, so the measurements offered by a portal and the
-    measurements a notebook runs are the same objects. Validation is the part
-    that is new: a file that fails the header check is reported as
-    ``rejected`` and is EXCLUDED from the measurement it would otherwise have
-    joined, so "Process All" never dispatches a job that is going to die on a
-    truncated frame stack.
+    measurements a notebook runs are the same objects. Grouping reads only
+    FILENAMES, so it costs one directory listing however big the directory is.
+
+    Validation is the part that is new, and the part that costs: a file that
+    fails the header check is reported as ``rejected`` and is EXCLUDED from
+    the measurement it would otherwise have joined, so a batch never
+    dispatches a run that is going to die on a truncated frame stack.
+
+    ``validate=False`` skips it. Use that when the answer is needed
+    INTERACTIVELY and the directory is large: the check is one open + one 8 kB
+    read per file, which is milliseconds on a local disk and minutes over a
+    network filesystem -- a real BL 6-2a beamtime of 16893 files did not
+    finish a validating pass in 15 minutes on the SSRL share. The report then
+    carries ``validated=False``, and header problems surface where they were
+    always going to be caught anyway: in the run itself, against one
+    measurement, with the file named.
     """
     directory = str(directory)
     if glob.has_magic(directory):
@@ -140,7 +157,7 @@ def scan_directory(directory: str, *, recursive: bool = False,
 
     rejected: list[dict] = []
     bad: set[str] = set()
-    for p in paths:
+    for p in (paths if validate else ()):
         reason = _validate_header(p)
         if reason is not None:
             rejected.append({"file": os.path.basename(p), "path": p, "reason": reason})
@@ -197,4 +214,5 @@ def scan_directory(directory: str, *, recursive: bool = False,
     measurements.sort(key=lambda m: (m["kind"], m["sample"], m["label"]))
     rejected.sort(key=lambda r: (r["reason"], r["file"]))
     return ScanReport(directory=directory, measurements=measurements,
-                      rejected=rejected, n_files=len(paths))
+                      rejected=rejected, n_files=len(paths),
+                      validated=validate)
