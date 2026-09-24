@@ -146,6 +146,118 @@ def _background_common_mode(bcg: np.ndarray, bcg_adjust: bool) -> float:
     return common_mode(bcg, refine=True)
 
 
+def background_common_mode(bcg, bcg_adjust: bool = True) -> float:
+    """Zero-peak position of a background image (``0`` disables scaling).
+
+    This is the ``bcg_cm`` argument of :func:`reduce_frame`; compute it once per
+    background, not per frame.
+    """
+    return _background_common_mode(np.asarray(bcg), bcg_adjust)
+
+
+def _threshold_array(thresholds) -> np.ndarray:
+    """``[low, xray, hi]``-style array from an array-like or a ``Thresholds``."""
+    if hasattr(thresholds, "as_array"):  # pipeline.Thresholds (no import cycle)
+        return np.array([thresholds.low, thresholds.xray, thresholds.hi], dtype=float)
+    return np.atleast_1d(np.asarray(thresholds, dtype=float))
+
+
+def subtract_pedestal(image: np.ndarray, bcg, bcg_cm: float, cm: float | None = None):
+    """Background-subtract one frame with per-frame pedestal scaling.
+
+    Returns ``(frame, bcg_adj)``: ``frame = image - bcg_adj * bcg`` where
+    ``bcg_adj = cm / bcg_cm`` (``1`` when ``bcg_cm`` is ``0``). ``cm`` is the
+    frame's refined common mode, computed here when not given.
+    """
+    if cm is None:
+        cm = common_mode(image, refine=True)
+    bcg_adj = (cm / bcg_cm) if bcg_cm > 0 else 1.0
+    return image - bcg_adj * bcg, bcg_adj
+
+
+def reduce_frame(image: np.ndarray, bcg, bcg_cm: float, thresholds, *,
+                 cm: float | None = None, hist: dict | None = None):
+    """Reduce ONE detector frame to its cleaned single-photon signal.
+
+    This is the per-frame body of :func:`extract_signal` (which calls it), so a
+    frame reduced here is bit-identical to that frame's contribution to an
+    ``extract_signal`` / ``OnePot`` sum.
+
+    Parameters
+    ----------
+    image:
+        Raw ``(height, width)`` frame.
+    bcg:
+        Background image (or scalar ``0``).
+    bcg_cm:
+        Background zero peak from :func:`background_common_mode` (``0`` = no
+        per-frame background scaling).
+    thresholds:
+        ``extract_signal``-style 1-3 element ``[low, xray, hi]`` array, or a
+        :class:`~tender_analysis.pipeline.Thresholds` (its ``low/xray/hi`` are
+        used, as :meth:`OnePot.run` does).
+    cm:
+        The frame's refined common mode, if already computed.
+    hist:
+        Optional dict of ADU histograms (see ``XESResult.histograms``) updated in
+        place.
+
+    Returns
+    -------
+    signal_frame, masks
+        ``signal_frame`` is the cleaned ``(height, width)`` signal. ``masks`` holds
+        boolean ``(height, width)`` arrays: ``"cosmic"`` (pixels above ``hi``,
+        zeroed), ``"events"`` (dilated 3x3 photon-detection mask), ``"grains"``
+        (event pixels that survived the per-grain intensity gate).
+    """
+    threshold = _threshold_array(thresholds)
+    frame, bcg_adj = subtract_pedestal(image, bcg, bcg_cm, cm=cm)
+
+    if hist is not None:
+        hist["raw"] += adu_histogram(image)          # col 4: raw data
+        hist["bkg_free"] += _hist_positive(frame)     # col 2: raw - bcg
+        hist["background"] += adu_histogram(bcg_adj * bcg)  # col 5: background
+
+    # cosmic / high-energy rejection
+    if threshold.size > 1:
+        cosmics = frame > threshold[-1]
+        frame = np.where(cosmics, 0.0, frame)
+    else:
+        cosmics = np.zeros(frame.shape, dtype=bool)
+
+    # 3x3 box sum, then neighbourhood gate + dilation
+    frame_binned = convolve2d(frame, _BOX3, mode="same")
+    if hist is not None:
+        hist["binned"] += _hist_positive(frame_binned)  # col 3: 3x3 binned
+    low = threshold[0]
+    frame_index = (frame > low / 4) & (frame_binned > low)
+    frame_index = convolve2d(frame_index.astype(float), _BOX3, mode="same") > 0
+
+    # keep only flagged pixels
+    frame = frame * frame_index
+    grains = frame_index
+
+    # connected-component intensity gating (needs 3rd threshold)
+    if threshold.size > 2 and frame_index.any():
+        labels, nlab = label(frame_index, structure=_CONN4)
+        if nlab > 0:
+            grain_int = sum_labels(frame, labels, index=np.arange(1, nlab + 1))
+            if hist is not None:
+                # col 1: ALL grain (X-ray event) intensities, clamped to
+                # [1, NBINS] -- MATLAB histograms every grain, then zeros
+                # sub-threshold ones only in `frame`.
+                clamped = np.clip(grain_int, 1, NBINS - 1)
+                hist["xray"] += np.bincount(
+                    np.ceil(clamped).astype(np.int64), minlength=NBINS)
+            bad = np.flatnonzero(grain_int < threshold[1]) + 1
+            if bad.size:
+                rejected = np.isin(labels, bad)
+                frame = np.where(rejected, 0.0, frame)
+                grains = frame_index & ~rejected
+
+    return frame, {"cosmic": cosmics, "events": frame_index, "grains": grains}
+
+
 def extract_signal(
     files: Iterable[SifFile],
     threshold,
@@ -231,46 +343,7 @@ def extract_signal(
             raw += image
 
             cm = common_mode(image, refine=True)
-            bcg_adj = (cm / bcg_cm) if bcg_cm > 0 else 1.0
-            frame = image - bcg_adj * bcg
-
-            if hist is not None:
-                hist["raw"] += adu_histogram(image)          # col 4: raw data
-                hist["bkg_free"] += _hist_positive(frame)     # col 2: raw - bcg
-                hist["background"] += adu_histogram(bcg_adj * bcg)  # col 5: background
-
-            # cosmic / high-energy rejection
-            cosmics = None
-            if threshold.size > 1:
-                cosmics = frame > threshold[-1]
-                frame = np.where(cosmics, 0.0, frame)
-
-            # 3x3 box sum, then neighbourhood gate + dilation
-            frame_binned = convolve2d(frame, _BOX3, mode="same")
-            if hist is not None:
-                hist["binned"] += _hist_positive(frame_binned)  # col 3: 3x3 binned
-            low = threshold[0]
-            frame_index = (frame > low / 4) & (frame_binned > low)
-            frame_index = convolve2d(frame_index.astype(float), _BOX3, mode="same") > 0
-
-            # keep only flagged pixels
-            frame = frame * frame_index
-
-            # connected-component intensity gating (needs 3rd threshold)
-            if threshold.size > 2 and frame_index.any():
-                labels, nlab = label(frame_index, structure=_CONN4)
-                if nlab > 0:
-                    grain_int = sum_labels(frame, labels, index=np.arange(1, nlab + 1))
-                    if hist is not None:
-                        # col 1: ALL grain (X-ray event) intensities, clamped to
-                        # [1, NBINS] -- MATLAB histograms every grain, then zeros
-                        # sub-threshold ones only in `frame`.
-                        clamped = np.clip(grain_int, 1, NBINS - 1)
-                        hist["xray"] += np.bincount(
-                            np.ceil(clamped).astype(np.int64), minlength=NBINS)
-                    bad = np.flatnonzero(grain_int < threshold[1]) + 1
-                    if bad.size:
-                        frame = np.where(np.isin(labels, bad), 0.0, frame)
+            frame, _ = reduce_frame(image, bcg, bcg_cm, threshold, cm=cm, hist=hist)
 
             if scan:
                 signal[file_idx] += frame

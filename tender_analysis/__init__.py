@@ -14,7 +14,7 @@ from .sif_io import SifFile
 from .files import find_sif_files
 from .background import compute_background
 from .curvature import CurvatureCorrection
-from .analyze import extract_signal, XESResult
+from .analyze import extract_signal, reduce_frame, XESResult
 from .pipeline import OnePot, OnePotRIXS, Thresholds, RIXSResult
 from .dataset import (
     index_beamtime, Measurement, FileRecord, BeamtimeIndex, parse_sif_name,
@@ -36,6 +36,7 @@ __all__ = [
     "find_sif_files",
     "compute_background",
     "extract_signal",
+    "reduce_frame",
     "CurvatureCorrection",
     "index_beamtime",
     "Measurement",
