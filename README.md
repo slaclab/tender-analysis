@@ -321,10 +321,65 @@ runs = idx.run_all(save_root="out", threshold=[100, 170, 350],
 `save_kwargs={"calibration": cal}` is dropped for RIXS results (whose export
 already carries an incident-energy axis), so a mixed-kind batch is safe.
 
+### Quick look, live HERFD, averaging, plots, CLI
+
+These modules (slaclab fork) sit on top of the pipeline and reuse its maths.
+`analyze.reduce_frame(image, bcg, bcg_cm, thresholds)` is the per-frame body
+of `extract_signal` (which now calls it), returning the cleaned frame plus
+`cosmic` / `events` / `grains` masks.
+
+```python
+from tender_analysis.preview import preview
+from tender_analysis.live import HerfdAccumulator
+from tender_analysis.average import average_series, group_repeats, normalize_average
+from tender_analysis import plotting   # needs matplotlib (the [notebook] extra)
+
+# One file -> uint8 raw / bkg_sub / events images (1-99.5 % stretch, block-mean
+# downsampled by (rows, cols)), full-resolution corrected spectrum, I0, mono...
+p = preview("data/Na2SO4/..._2490.00.sif", dark="data/Na2SO4/..._dark.sif")
+p["spectrum"]            # == OnePot([path], bcg=dark_mean).run().spectrum()
+
+# HERFD while the series is still being acquired; equals OnePotRIXS.herfd()
+acc = HerfdAccumulator(n=7, dark="data/Na2SO4/..._dark.sif")
+for path in new_files:
+    acc.add(path)
+res = acc.result()       # RIXSResult: E, HERFD, TFY, central_pix, rixs_map
+acc.set_roi(1305, n=5)   # re-slice without re-reading
+
+# Repeated series (same sample/line, different series_index) -> mean/std/n
+avg = average_series([res_01, res_02])
+norm = normalize_average(avg)          # export.normalize_mu on the mean
+
+fig = plotting.image_with_spectrum(p, central_pix=res.central_pix, n=7)
+fig = plotting.rixs_map(res); fig = plotting.herfd_overlay([res_01, res_02], tfy=True)
+```
+
+`HerfdAccumulator` follows `OnePotRIXS` exactly: one curvature is fitted on the
+summed signal of *all* points and applied to each, so it is refitted at every
+`result()` (the stored per-file planes are sparse, nothing is re-read); the
+incident energy is `mono` from the SIF comment, else the filename's `dddd.dd`
+token. It has no min-projection background (that needs every frame first):
+pass `dark=`, or add the `*_dark.sif` before the first scan point.
+
+Command line (`batch` runs a process pool, so the module has a `__main__` guard):
+
+```bash
+python -m tender_analysis.cli list   data/Na2SO4
+python -m tender_analysis.cli reduce data/Na2SO4 --measurement Na2SO4_pellet_20pcSucrose_Ka_RIXS_01 \
+       --out out/ --n 7 [--central-pix 1305] [--no-i0] [--thresholds 60 100 170 2000]
+python -m tender_analysis.cli batch  data/Na2SO4 --out out/ --max-workers 4
+```
+
+`reduce` writes the chemcat CSV (`write_xas_csv` for RIXS, `write_xes_csv` for
+XES); `batch` is `index_beamtime(...).run_all(save_root=...)` (text outputs +
+`run_manifest.json`). Tests: `pytest tests` (uses the bundled `data/Na2SO4`;
+`tests/test_regression.py` pins the reduction bit-for-bit to
+`tests/data/golden_na2so4.npz`).
+
 ## Dependencies
 
 numpy, scipy, natsort, sif_parser. The package itself is plot-free; matplotlib
-is needed only by the example notebook (`pip install tender-analysis[notebook]`).
+is needed only by the example notebook and `tender_analysis.plotting` (`pip install tender-analysis[notebook]`).
 
 ## Setup
 
