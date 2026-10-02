@@ -153,8 +153,9 @@ def adu_histogram(hist, thresholds=None, key: str = "bkg_free", xmax: int | None
 def curvature_before_after(result, rows=None):
     """Summed signal before and after curvature correction (``XESResult``).
 
-    Two image panels sharing both axes, plus the row profile of each so the
-    straightening shows as a narrower peak. ``rows`` optionally crops
+    Two image panels sharing both axes, plus the column-sum spectrum of each:
+    the correction shifts every row sideways along the dispersive axis, so the
+    straightening shows as a narrower spectral peak. ``rows`` optionally crops
     ``(start, stop)`` detector rows.
     """
     before = result.signal.sum(axis=0) if result.signal.ndim == 3 else result.signal
@@ -176,12 +177,12 @@ def curvature_before_after(result, rows=None):
     ax0.set_ylabel("detector row", color=INK)
 
     axp = fig.add_subplot(gs[1, :])
-    r = np.arange(before.shape[0])[sl]
-    axp.plot(r, before[sl].sum(axis=1), color=SERIES[0], linewidth=1.5, label="before")
-    axp.plot(r, after[sl].sum(axis=1), color=SERIES[1], linewidth=1.5, label="after")
+    x = np.arange(before.shape[1])
+    axp.plot(x, before[sl].sum(axis=0), color=SERIES[0], linewidth=1.5, label="before")
+    axp.plot(x, after[sl].sum(axis=0), color=SERIES[1], linewidth=1.5, label="after")
     axp.legend(frameon=False, labelcolor=INK)
     _style(axp)
-    axp.set_xlabel("detector row", color=INK)
+    axp.set_xlabel("dispersive pixel", color=INK)
     axp.set_ylabel("counts", color=INK)
     t = getattr(result, "t", None)
     if t is not None and not np.isscalar(t):
