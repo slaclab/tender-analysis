@@ -12,3 +12,7 @@ hpc/
 # python bytecode
 __pycache__/
 *.pyc
+
+# local virtualenv
+venv/
+.DS_Store

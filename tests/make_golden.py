@@ -1,8 +1,9 @@
 """Regenerate ``tests/data/golden_na2so4.npz`` -- the refactor regression fixture.
 
 Run from the repo root ONLY on a revision whose reduction behaviour is the
-reference (it was captured before ``reduce_frame`` was factored out of
-``extract_signal``):
+reference (first captured before ``reduce_frame`` was factored out of
+``extract_signal``; recaptured after the upstream curvature-axis fix, b39b2a7,
+which intentionally changes every curvature-corrected output):
 
     python tests/make_golden.py
 
